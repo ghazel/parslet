@@ -2,13 +2,13 @@ INTRODUCTION
 
 Parslet makes developing complex parsers easy. It does so by
 
-* providing the best <b>error reporting</b> possible
-* <b>not generating</b> reams of code for you to debug
+* providing the best error reporting possible
+* not generating reams of code for you to debug
 
-Parslet takes the long way around to make <b>your job</b> easier. It allows
-for incremental language construction. Often, you start out small,
-implementing the atoms of your language first; _parslet_ takes pride in making
-this possible.
+Parslet takes the long way around to make your job easier. It allows for
+incremental language construction. Often, you start out small, implementing
+the atoms of your language first; _parslet_ takes pride in making this
+possible.
 
 Eager to try this out? Please see the associated web site:
 http://kschiess.github.com/parslet
@@ -18,26 +18,38 @@ SYNOPSIS
   require 'parslet'
   include Parslet
 
-  # Constructs a parser using a Parser Expression Grammar like DSL: 
-  parser =  str('"') >> 
-            (
-              str('\\') >> any |
-              str('"').absnt? >> any
-            ).repeat.as(:string) >> 
-            str('"')
-  
-  # Parse the string and capture parts of the interpretation (:string above)        
-  tree = parser.parse('"This is a \\"String\\" in which you can escape stuff"')
+  # parslet parses strings
+  str('foo').
+    parse('foo') # => "foo"@0
 
-  tree # => {:string=>"This is a \\\"String\\\" in which you can escape stuff"}
+  # it matches character sets
+  match['abc'].parse('a') # => "a"@0
+  match['abc'].parse('b') # => "b"@0
+  match['abc'].parse('c') # => "c"@0
 
-  # Here's how you can grab results from that tree:
+  # and it annotates its output
+  str('foo').as(:important_bit).
+    parse('foo') # => {:important_bit=>"foo"@0}
 
-  transform = Parslet::Transform.new do
-    rule(:string => simple(:x)) { 
-      puts "String contents: #{x}" }
+  # you can construct parsers with just a few lines
+  quote = str('"')
+  simple_string = quote >> (quote.absent? >> any).repeat >> quote
+
+  simple_string.
+    parse('"Simple Simple Simple"') # => "\"Simple Simple Simple\""@0
+
+  # or by making a fuss about it 
+  class Smalltalk < Parslet::Parser
+    root :smalltalk
+
+    rule(:smalltalk) { statements }
+    rule(:statements) { 
+      # insert smalltalk parser here (outside of the scope of this readme)
+    }
   end
-  transform.apply(tree)
+
+  # and then
+  Smalltalk.new.parse('smalltalk')
 
 COMPATIBILITY
 
@@ -48,8 +60,11 @@ issues.
 Note that due to Ruby 1.8 internals, Unicode parsing is not supported on that 
 version. 
 
+On Mac OS X Lion, ruby-1.8.7-p352 has been known to segfault. Use
+ruby-1.8.7-p334 for better results.
+
 STATUS 
 
-At version 1.2.1 - See HISTORY.txt for changes.
+At version 1.4.0 - See HISTORY.txt for changes.
 
-(c) 2010 Kaspar Schiess
+(c) 2010, 2011, 2012 Kaspar Schiess

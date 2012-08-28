@@ -31,7 +31,7 @@ describe Parslet::Atoms do
   describe Parslet::Atoms::Repetition do
     let(:parslet) { str('a').repeat(1,2) }
     it "should call back visitor" do
-      visitor.should_receive(:visit_repetition).with(1, 2, Parslet::Atoms::Base).once
+      visitor.should_receive(:visit_repetition).with(:repetition, 1, 2, Parslet::Atoms::Base).once
       
       parslet.accept(visitor)
     end 
@@ -65,6 +65,15 @@ describe Parslet::Atoms do
     it "should call back visitor" do
       visitor.should_receive(:visit_lookahead).with(false, Parslet::Atoms::Base).once
       
+      parslet.accept(visitor)
+    end 
+  end
+  describe "< Parslet::Parser" do
+    let(:parslet) { Parslet::Parser.new }
+    it "calls back to visitor" do
+      visitor.should_receive(:visit_parser).with(:root).once
+      
+      flexmock(parslet, :root => :root)
       parslet.accept(visitor)
     end 
   end

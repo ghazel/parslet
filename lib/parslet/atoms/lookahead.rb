@@ -8,26 +8,31 @@ class Parslet::Atoms::Lookahead < Parslet::Atoms::Base
   attr_reader :positive
   attr_reader :bound_parslet
   
-  def initialize(bound_parslet, positive=true) # :nodoc:
+  def initialize(bound_parslet, positive=true)
     super()
     
     # Model positive and negative lookahead by testing this flag.
     @positive = positive
     @bound_parslet = bound_parslet
+    
     @error_msgs = {
-      :positive => "lookahead: #{bound_parslet.inspect} didn't match, but should have", 
-      :negative => "negative lookahead: #{bound_parslet.inspect} matched, but shouldn't have"
+      :positive => ["Input should start with ", bound_parslet], 
+      :negative => ["Input should not start with ", bound_parslet]
     }
   end
   
-  def try(source, context) # :nodoc:
+  def try(source, context)
     pos = source.pos
 
-    value = bound_parslet.apply(source, context)
-    return success(nil) if positive ^ value.error?
+    success, value = bound_parslet.apply(source, context)
     
-    return error(source, @error_msgs[:positive]) if positive
-    return error(source, @error_msgs[:negative])
+    if positive
+      return succ(nil) if success
+      return context.err_at(self, source, @error_msgs[:positive], pos)
+    else
+      return succ(nil) unless success
+      return context.err_at(self, source, @error_msgs[:negative], pos)
+    end
     
   # This is probably the only parslet that rewinds its input in #try.
   # Lookaheads NEVER consume their input, even on success, that's why. 
@@ -36,13 +41,9 @@ class Parslet::Atoms::Lookahead < Parslet::Atoms::Base
   end
   
   precedence LOOKAHEAD
-  def to_s_inner(prec) # :nodoc:
+  def to_s_inner(prec)
     char = positive ? '&' : '!'
     
     "#{char}#{bound_parslet.to_s(prec)}"
-  end
-
-  def error_tree # :nodoc:
-    bound_parslet.error_tree
   end
 end

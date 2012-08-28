@@ -19,34 +19,32 @@ class Parslet::Atoms::Alternative < Parslet::Atoms::Base
     super()
     
     @alternatives = alternatives
-    @error_msg = "Expected one of #{alternatives.inspect}."
+    @error_msg = "Expected one of #{alternatives.inspect}"
   end
 
   #---
   # Don't construct a hanging tree of Alternative parslets, instead store them
   # all here. This reduces the number of objects created.
   #+++
-  def |(parslet) # :nodoc:
-    @alternatives << parslet
-    self
+  def |(parslet)
+    self.class.new(*@alternatives + [parslet])
   end
   
-  def try(source, context) # :nodoc:
-    alternatives.each { |a|
-      value = a.apply(source, context)
-      return value unless value.error?
+  def try(source, context)
+    errors = alternatives.map { |a|
+      success, value = result = a.apply(source, context)
+      return result if success
+      
+      # Aggregate all errors
+      value
     }
+    
     # If we reach this point, all alternatives have failed. 
-    error(source, @error_msg)
+    context.err(self, source, @error_msg, errors)
   end
 
   precedence ALTERNATE
-  def to_s_inner(prec) # :nodoc:
+  def to_s_inner(prec)
     alternatives.map { |a| a.to_s(prec) }.join(' / ')
-  end
-
-  def error_tree # :nodoc:
-    Parslet::ErrorTree.new(self, *alternatives.
-      map { |child| child.error_tree })
   end
 end

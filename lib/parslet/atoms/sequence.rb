@@ -15,31 +15,24 @@ class Parslet::Atoms::Sequence < Parslet::Atoms::Base
     }
   end
   
-  def >>(parslet) # :nodoc:
-    @parslets << parslet
-    self
+  def >>(parslet)
+    self.class.new(* @parslets+[parslet])
   end
   
-  def try(source, context) # :nodoc:
-    success([:sequence]+parslets.map { |p| 
-      # Save each parslet as potentially offending (raising an error). 
-      @offending_parslet = p
+  def try(source, context)
+    succ([:sequence]+parslets.map { |p| 
+      success, value = p.apply(source, context) 
 
-      value = p.apply(source, context) 
-
-      return error(source, @error_msgs[:failed]) if value.error?
-
-      value.result
+      unless success
+        return context.err(self, source, @error_msgs[:failed], [value]) 
+      end
+      
+      value
     })
   end
       
   precedence SEQUENCE
-  def to_s_inner(prec) # :nodoc:
+  def to_s_inner(prec)
     parslets.map { |p| p.to_s(prec) }.join(' ')
-  end
-
-  def error_tree # :nodoc:
-    Parslet::ErrorTree.new(self).tap { |t|
-      t.children << @offending_parslet.error_tree if @offending_parslet }
   end
 end

@@ -14,3 +14,11 @@ RSpec.configure do |config|
     RUBY_VERSION.to_s !~ /^#{Regexp.escape(version.to_s)}/
   }
 end
+
+def catch_failed_parse
+  begin
+    yield
+  rescue Parslet::ParseFailed => exception
+  end
+  exception.cause
+end

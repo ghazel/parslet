@@ -10,29 +10,27 @@ class Parslet::Atoms::Str < Parslet::Atoms::Base
     super()
 
     @str = str.to_s
+    @len = str.size
     @error_msgs = {
       :premature  => "Premature end of input", 
       :failed     => "Expected #{str.inspect}, but got "
     }
   end
   
-  def try(source, context) # :nodoc:
-    # NOTE: Even though it doesn't look that way, this is the hotspot, the
-    # contents of parslets inner loop. Changes here affect parslets speed 
-    # enormously.
-    error_pos = source.pos
-    s = source.read(str.size)
-
-    return success(s) if s == str
+  def try(source, context)
+    return succ(source.consume(@len)) if source.matches?(str)
     
-    # assert: s != str
-
     # Failures: 
-    return error(source, @error_msgs[:premature]) unless s && s.size==str.size
-    return error(source, [@error_msgs[:failed], s], error_pos) 
+    return context.err(self, source, @error_msgs[:premature]) \
+      if source.chars_left<@len
+      
+    error_pos = source.pos  
+    return context.err_at(
+      self, source, 
+      [@error_msgs[:failed], source.consume(@len)], error_pos) 
   end
   
-  def to_s_inner(prec) # :nodoc:
+  def to_s_inner(prec)
     "'#{str}'"
   end
 end

@@ -11,12 +11,6 @@ describe Parslet::Atoms::Base do
       }.should raise_error(NotImplementedError)
     end 
   end
-  describe "<- #error_tree" do
-    it "should always return a tree" do
-      parslet.cause.should be_nil
-      parslet.error_tree.should_not be_nil
-    end 
-  end
   describe "<- #flatten_sequence" do
     [
       # 9 possibilities for making a word of 2 letters from the alphabeth of
@@ -56,6 +50,24 @@ describe Parslet::Atoms::Base do
       unnamed([[{:a=>"a"}, {:m=>"m"}], {:a=>"a"}]).should == [{:a=>"a"}]
     end 
   end
+  describe '#parse(source)' do
+    context "when given something that looks like a source" do
+      let(:source) { flexmock("source lookalike", 
+        :line_and_column => [1,2], 
+        :pos => 1, 
+        :chars_left => 0) }
+      
+      it "should not rewrap in a source" do
+        flexmock(Parslet::Source).
+          should_receive(:new => :source_created).never
+        
+        begin
+          parslet.parse(source) 
+        rescue NotImplementedError
+        end
+      end 
+    end
+  end
   
   context "when the parse fails, the exception" do
     it "should contain a string" do
@@ -68,33 +80,46 @@ describe Parslet::Atoms::Base do
   end
   context "when not all input is consumed" do
     let(:parslet) { Parslet.str('foo') }
+    
     it "should raise with a proper error message" do
       begin
         parslet.parse('foobar')
       rescue Parslet::ParseFailed => ex
-        ex.message.should == "Don't know what to do with bar at line 1 char 4."
+        ex.message.should == "Don't know what to do with \"bar\" at line 1 char 4."
       end
     end 
   end
-  context "when a match succeeds" do
-    context "when there is an error from a previous run" do
-      before(:each) do
-        catch(:error) {
-          parslet.send(:error, Parslet::Source.new('test'), 'cause') 
-        }
+  context "when only parsing string prefix" do
+    let(:parslet) { Parslet.str('foo') >> Parslet.str('bar') }
+    
+    it "returns the first half on a prefix parse" do
+      parslet.parse('foobarbaz', :prefix => true).should == 'foobar'
+    end 
+  end
 
-        parslet.cause.should == "cause at line 1 char 1."
-      end
-      it "should reset the #cause to nil" do
-        success = flexmock(:success, :error? => false)
-        flexmock(parslet).
-          should_receive(:try => success)
+  describe ':reporter option' do
+    let(:parslet) { Parslet.str('test') >> Parslet.str('ing') }
+    let(:reporter) { flexmock(:reporter) }
+    
+    it "replaces the default reporter" do
+      cause = flexmock(:cause)
+      
+      # Two levels of the parse, calling two different error reporting
+      # methods.
+      reporter.
+        should_receive(:err_at).once
+      reporter.
+        should_receive(:err => cause).once
+      
+      # The final cause will be sent the #raise method.
+      cause.
+        should_receive(:raise).once.and_throw(:raise)
+      
+      catch(:raise) {
+        parslet.parse('testung', :reporter => reporter)
         
-        parslet.apply(Parslet::Source.new(''), context)
-        
-        parslet.cause?.should == false
-        parslet.cause.should be_nil
-      end 
-    end
+        fail "NEVER REACHED"
+      }
+    end 
   end
 end

@@ -1,6 +1,6 @@
 # Encoding: UTF-8
 
-require File.dirname(__FILE__) + '/../spec_helper'
+require 'spec_helper'
 
 require 'parslet'
 
@@ -129,7 +129,7 @@ describe "Regressions from real examples" do
     end
     
     it "should count lines correctly" do
-      begin
+      cause = catch_failed_parse {
         subject.parse('
           a 
           a a a 
@@ -139,17 +139,10 @@ describe "Regressions from real examples" do
           */
           b
         ')
-      rescue => ex
-      end
-      remove_indent(subject.error_tree).should == remove_indent(%q(
-        `- Unknown error in (LINE EOL){1, } / LINE
-           |- Failed to match sequence (LINE EOL) at line 8 char 11.
-           |  `- Failed to match sequence (SPACE? [\n\r]{1, }) at line 8 char 11.
-           |     `- Expected at least 1 of [\n\r] at line 8 char 11.
-           |        `- Failed to match [\n\r] at line 8 char 11.
-           `- Unknown error in SPACE? exp:AN_EXPRESSION{0, }
-              `- Failed to match sequence (a:'a' SPACE?) at line 8 char 11.
-                 `- Expected "a", but got "b" at line 8 char 11.).strip)
+      }
+
+      remove_indent(cause.ascii_tree).should == remove_indent(%q(
+        Don't know what to do with "b\n        " at line 8 char 11.).strip)
     end 
   end
 

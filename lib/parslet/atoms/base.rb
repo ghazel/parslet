@@ -6,82 +6,87 @@
 class Parslet::Atoms::Base
   include Parslet::Atoms::Precedence
   include Parslet::Atoms::DSL
-  
-  # Internally, all parsing functions return either an instance of Fail 
-  # or an instance of Success. 
-  #
-  class Fail < Struct.new(:message)
-    def error?; true end
-  end
-
-  # Internally, all parsing functions return either an instance of Fail 
-  # or an instance of Success.
-  #
-  class Success < Struct.new(:result)
-    def error?; false end
-  end
+  include Parslet::Atoms::CanFlatten
   
   # Given a string or an IO object, this will attempt a parse of its contents
   # and return a result. If the parse fails, a Parslet::ParseFailed exception
   # will be thrown. 
   #
-  def parse(io)
-    source = Parslet::Source.new(io)
-    context = Parslet::Atoms::Context.new
-    
-    result = nil
-    value = apply(source, context)
+  # @param io [String, Source] input for the parse process
+  # @option options [Parslet::ErrorReporter] :reporter error reporter to use, 
+  #   defaults to Parslet::ErrorReporter::Tree 
+  # @option options [Boolean] :prefix Should a prefix match be accepted? 
+  #   (default: false)
+  # @return [Hash, Array, Parslet::Slice] PORO (Plain old Ruby object) result
+  #   tree
+  #
+  def parse(io, options={})
+    source = io.respond_to?(:line_and_column) ? 
+      io : 
+      Parslet::Source.new(io)
+
+    # Try to cheat. Assuming that we'll be able to parse the input, don't 
+    # run error reporting code. 
+    success, value = setup_and_apply(source, nil)
     
     # If we didn't succeed the parse, raise an exception for the user. 
     # Stack trace will be off, but the error tree should explain the reason
     # it failed.
-    if value.error?
-      parse_failed(value.message)
+    unless success
+      # Cheating has not paid off. Now pay the cost: Rerun the parse,
+      # gathering error information in the process.
+      reporter = options[:reporter] || Parslet::ErrorReporter::Tree.new
+      success, value = setup_and_apply(source, reporter)
+      
+      fail "Assertion failed: success was true when parsing with reporter" \
+        if success
+      
+      # Value is a Parslet::Cause, which can be turned into an exception:
+      value.raise
+      
+      fail "NEVER REACHED"
     end
     
-    # assert: value is a success answer
+    # assert: success is true
     
     # If we haven't consumed the input, then the pattern doesn't match. Try
     # to provide a good error message (even asking down below)
-    unless source.eof?
-      # Do we know why we stopped matching input? If yes, that's a good
-      # error to fail with. Otherwise just report that we cannot consume the
-      # input.
-      if cause 
-        # We're not using #parse_failed here, since it assigns to @last_cause.
-        # Still: We'll raise this differently, since the real cause is different.
-        raise Parslet::UnconsumedInput, 
-          "Unconsumed input, maybe because of this: #{cause}"
-      else
-        old_pos = source.pos
-        parse_failed(
-          format_cause(source, 
-            "Don't know what to do with #{source.read(100)}", old_pos), 
-          Parslet::UnconsumedInput)
-      end
+    if !options[:prefix] && source.chars_left > 0
+      old_pos = source.pos
+      Parslet::Cause.format(
+        source, old_pos, 
+        "Don't know what to do with #{source.consume(10).to_s.inspect}").
+        raise(Parslet::UnconsumedInput)
     end
     
-    return flatten(value.result)
+    return flatten(value)
+  end
+  
+  # Creates a context for parsing and applies the current atom to the input. 
+  # Returns the parse result. 
+  #
+  # @return [<Boolean, Object>] Result of the parse. If the first member is 
+  #   true, the parse has succeeded. 
+  def setup_and_apply(source, error_reporter)
+    context = Parslet::Atoms::Context.new(error_reporter)
+    apply(source, context)
   end
 
   #---
   # Calls the #try method of this parslet. In case of a parse error, apply
   # leaves the source in the state it was before the attempt. 
   #+++
-  def apply(source, context) # :nodoc:
+  def apply(source, context)
     old_pos = source.pos
-    
-    result = try(source, context)
-    
-    # This has just succeeded, so last_cause must be empty
-    unless result.error?
-      @last_cause = nil 
-      return result
-    end
-    
+
+    #success, value = result = context.try_with_cache(self, source)
+    success, value = result = try(source, context)
+
+    return result if success
+
     # We only reach this point if the parse has failed. Rewind the input.
     source.pos = old_pos
-    return result # is instance of Fail
+    return result
   end
   
   # Override this in your Atoms::Base subclasses to implement parsing
@@ -92,203 +97,28 @@ class Parslet::Atoms::Base
       "Atoms::Base doesn't have behaviour, please implement #try(source, context)."
   end
 
-  # Takes a mixed value coming out of a parslet and converts it to a return
-  # value for the user by dropping things and merging hashes. 
-  #
-  # Named is set to true if this result will be embedded in a Hash result from 
-  # naming something using <code>.as(...)</code>. It changes the folding 
-  # semantics of repetition.
-  #
-  def flatten(value, named=false) # :nodoc:
-    # Passes through everything that isn't an array of things
-    return value unless value.instance_of? Array
-
-    # Extracts the s-expression tag
-    tag, *tail = value
-
-    # Merges arrays:
-    result = tail.
-      map { |e| flatten(e) }            # first flatten each element
-      
-    case tag
-      when :sequence
-        return flatten_sequence(result)
-      when :maybe
-        return named ? result.first : result.first || ''
-      when :repetition
-        return flatten_repetition(result, named)
-    end
-    
-    fail "BUG: Unknown tag #{tag.inspect}."
-  end
-
-  # Lisp style fold left where the first element builds the basis for 
-  # an inject. 
-  #
-  def foldl(list, &block)
-    return '' if list.empty?
-    list[1..-1].inject(list.first, &block)
-  end
-  
-  # Flatten results from a sequence of parslets. 
-  #
-  def flatten_sequence(list) # :nodoc:
-    foldl(list.compact) { |r, e|        # and then merge flat elements
-      merge_fold(r, e)
-    }
-  end
-  def merge_fold(l, r) # :nodoc:
-    # equal pairs: merge. ----------------------------------------------------
-    if l.class == r.class
-      if l.is_a?(Hash)
-        warn_about_duplicate_keys(l, r)
-        return l.merge(r)
-      else
-        return l + r
-      end
-    end
-    
-    # unequal pairs: hoist to same level. ------------------------------------
-    
-    # Maybe classes are not equal, but both are stringlike?
-    if l.respond_to?(:to_str) && r.respond_to?(:to_str)
-      # if we're merging a String with a Slice, the slice wins. 
-      return r if r.respond_to? :to_slice
-      return l if l.respond_to? :to_slice
-      
-      fail "NOTREACHED: What other stringlike classes are there?"
-    end
-    
-    # special case: If one of them is a string/slice, the other is more important 
-    return l if r.respond_to? :to_str
-    return r if l.respond_to? :to_str
-    
-    # otherwise just create an array for one of them to live in 
-    return l + [r] if r.class == Hash
-    return [l] + r if l.class == Hash
-    
-    fail "Unhandled case when foldr'ing sequence."
-  end
-
-  # Flatten results from a repetition of a single parslet. named indicates
-  # whether the user has named the result or not. If the user has named
-  # the results, we want to leave an empty list alone - otherwise it is 
-  # turned into an empty string. 
-  #
-  def flatten_repetition(list, named) # :nodoc:
-    if list.any? { |e| e.instance_of?(Hash) }
-      # If keyed subtrees are in the array, we'll want to discard all 
-      # strings inbetween. To keep them, name them. 
-      return list.select { |e| e.instance_of?(Hash) }
-    end
-
-    if list.any? { |e| e.instance_of?(Array) }
-      # If any arrays are nested in this array, flatten all arrays to this
-      # level. 
-      return list.
-        select { |e| e.instance_of?(Array) }.
-        flatten(1)
-    end
-    
-    # Consistent handling of empty lists, when we act on a named result        
-    return [] if named && list.empty?
-            
-    # If there are only strings, concatenate them and return that. 
-    foldl(list) { |s,e| s+e }
-  end
-
   # Debug printing - in Treetop syntax. 
   #
-  def self.precedence(prec) # :nodoc:
+  def self.precedence(prec)
     define_method(:precedence) { prec }
   end
   precedence BASE
-  def to_s(outer_prec=OUTER) # :nodoc:
+  def to_s(outer_prec=OUTER)
     if outer_prec < precedence
       "("+to_s_inner(precedence)+")"
     else
       to_s_inner(precedence)
     end
   end
-  def inspect # :nodoc:
+  def inspect
     to_s(OUTER)
-  end
-
-  # Cause should return the current best approximation of this parslet
-  # of what went wrong with the parse. Not relevant if the parse succeeds, 
-  # but needed for clever error reports. 
-  #
-  def cause # :nodoc:
-    @last_cause && @last_cause.to_s || nil
-  end
-  def cause? # :nodoc:
-    !!@last_cause
-  end
-
-  # Error tree returns what went wrong here plus what went wrong inside 
-  # subexpressions as a tree. The error stored for this node will be equal
-  # to #cause. 
-  #
-  def error_tree
-    Parslet::ErrorTree.new(self)
   end
 
 private
 
   # Produces an instance of Success and returns it. 
   #
-  def success(result)
-    Success.new(result)
-  end
-
-  # Produces an instance of Fail and returns it. 
-  #
-  def error(source, str, pos=nil)
-    @last_cause = format_cause(source, str, pos)
-    Fail.new(@last_cause)
-  end
-
-  # Signals to the outside that the parse has failed. Use this in conjunction
-  # with #format_cause for nice error messages. 
-  #
-  def parse_failed(cause, exception_klass=Parslet::ParseFailed)
-    @last_cause = cause
-    raise exception_klass,
-      @last_cause.to_s
-  end
-  
-  # An internal class that allows delaying the construction of error messages
-  # (as strings) until we really need to print them. 
-  #
-  class Cause < Struct.new(:message, :source, :pos)
-    def to_s
-      line, column = source.line_and_column(pos)
-      # Allow message to be a list of objects. Join them here, since we now
-      # really need it. 
-      Array(message).map { |o| 
-        o.respond_to?(:to_slice) ? 
-          o.str.inspect : 
-          o.to_s }.join + " at line #{line} char #{column}."
-    end
-  end
-
-  # Appends 'at line ... char ...' to the string given. Use +pos+ to override
-  # the position of the +source+. This method returns an object that can 
-  # be turned into a string using #to_s.
-  #
-  def format_cause(source, str, pos=nil)
-    real_pos = (pos||source.pos)
-    Cause.new(str, source, real_pos)
-  end
-
-  # That annoying warning 'Duplicate subtrees while merging result' comes 
-  # from here. You should add more '.as(...)' names to your intermediary tree.
-  #
-  def warn_about_duplicate_keys(h1, h2)
-    d = h1.keys & h2.keys
-    unless d.empty?
-      warn "Duplicate subtrees while merging result of \n  #{self.inspect}\nonly the values"+
-           " of the latter will be kept. (keys: #{d.inspect})"
-    end
+  def succ(result)
+    [true, result]
   end
 end

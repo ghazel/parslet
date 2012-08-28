@@ -45,11 +45,8 @@ describe Parslet::Atoms::Entity do
       parser.recdef.parse("(((a)))")
     end
     it "should not throw 'stack level too deep' when printing errors" do
-      begin
-        parser.recdef.parse('(((a))')
-      rescue Parslet::ParseFailed
-      end
-      parser.recdef.error_tree.ascii_tree
+      cause = catch_failed_parse { parser.recdef.parse('(((a))') }
+      cause.ascii_tree
     end
   end
 end

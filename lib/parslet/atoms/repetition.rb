@@ -19,46 +19,45 @@ class Parslet::Atoms::Repetition < Parslet::Atoms::Base
     }
   end
   
-  def try(source, context) # :nodoc:
+  def try(source, context)
     occ = 0
-    result = [@tag]   # initialize the result array with the tag (for flattening)
+    accum = [@tag]   # initialize the result array with the tag (for flattening)
     start_pos = source.pos
+    
+    break_on = nil
     loop do
-      value = parslet.apply(source, context)
-      break if value.error?
+      success, value = parslet.apply(source, context)
+
+      break_on = value
+      break unless success
 
       occ += 1
-      result << value.result
+      accum << value
       
-      # If we're not greedy (max is defined), check if that has been 
-      # reached. 
-      return success(result) if max && occ>=max
+      # If we're not greedy (max is defined), check if that has been reached. 
+      return succ(accum) if max && occ>=max
     end
     
+    # Last attempt to match parslet was a failure, failure reason in break_on.
+    
     # Greedy matcher has produced a failure. Check if occ (which will
-    # contain the number of sucesses) is in {min, max}.
-    return error(source, @error_msgs[:minrep], start_pos) if occ < min
-    return success(result)
+    # contain the number of sucesses) is >= min.
+    return context.err_at(
+      self, 
+      source, 
+      @error_msgs[:minrep], 
+      start_pos, 
+      [break_on]) if occ < min
+      
+    return succ(accum)
   end
   
   precedence REPETITION
-  def to_s_inner(prec) # :nodoc:
+  def to_s_inner(prec)
     minmax = "{#{min}, #{max}}"
     minmax = '?' if min == 0 && max == 1
 
     parslet.to_s(prec) + minmax
-  end
-
-  def cause # :nodoc:
-    # Either the repetition failed or the parslet inside failed to repeat. 
-    super || parslet.cause
-  end
-  def error_tree # :nodoc:
-    if cause?
-      Parslet::ErrorTree.new(self, parslet.error_tree)
-    else
-      parslet.error_tree
-    end
   end
 end
 

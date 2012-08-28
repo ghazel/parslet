@@ -26,10 +26,10 @@ describe Parslet do
       parslet.parse('c')
     end 
     it "should not parse d" do
-      lambda {
+      cause = catch_failed_parse {
         parslet.parse('d')
-      }.should not_parse
-      parslet.cause.should == "Failed to match [abc] at line 1 char 1."
+      }
+      cause.to_s.should == "Failed to match [abc] at line 1 char 1."
     end 
     it "should print as [abc]" do
       parslet.inspect.should == "[abc]"
@@ -42,16 +42,14 @@ describe Parslet do
     end
     
     context "when failing on input 'aa'" do
-      before(:each) do
-        lambda {
-          parslet.parse('aa')
-        }.should not_parse
-      end
+      let!(:cause) {
+        catch_failed_parse { parslet.parse('aa') }
+      }
       it "should have a relevant cause" do
-        parslet.cause.should == "Expected at least 3 of [a] at line 1 char 1."
+        cause.to_s.should == "Expected at least 3 of [a] at line 1 char 1."
       end 
       it "should have a tree with 2 nodes" do
-        parslet.error_tree.nodes.should == 2
+        cause.children.should have(1).elements
       end 
     end
     it "should succeed on 'aaa'" do
@@ -74,10 +72,8 @@ describe Parslet do
       parslet.parse('foo')
     end
     it "should not parse 'bar'"  do
-      lambda {
-        parslet.parse('bar')
-      }.should not_parse
-      parslet.cause.should == 
+      cause = catch_failed_parse { parslet.parse('bar') }
+      cause.to_s.should == 
         "Expected \"foo\", but got \"bar\" at line 1 char 1."
     end
     it "should inspect as 'foo'" do
@@ -110,31 +106,23 @@ describe Parslet do
     end
   end
   describe "str('foo') >> str('bar')" do
-    attr_reader :parslet
-    before(:each) do
-      @parslet = str('foo') >> str('bar')
-    end
+    let(:parslet) { str('foo') >> str('bar') }
     
     context "when it fails on input 'foobaz'" do
-      before(:each) do
-        lambda {
-          parslet.parse('foobaz')
-        }.should not_parse
-      end
+      let!(:cause) {
+        catch_failed_parse { parslet.parse('foobaz') }
+      }
 
       it "should not parse 'foobaz'" do
-        parslet.cause.should == "Failed to match sequence ('foo' 'bar') at line 1 char 4."
+        cause.to_s.should == "Failed to match sequence ('foo' 'bar') at line 1 char 4."
       end
       it "should have 2 nodes in error tree" do
-        parslet.error_tree.nodes.should == 2
+        cause.should have(1).children
       end 
     end
     it "should parse 'foobar'" do
       parslet.parse('foobar')
     end
-    it "should return self for chaining" do
-      (parslet >> str('baz')).should == parslet
-    end 
     it "should inspect as ('foo' 'bar')" do
       parslet.inspect.should == "'foo' 'bar'"
     end 
@@ -146,17 +134,15 @@ describe Parslet do
     end
     
     context "when failing on input 'baz'" do
-      before(:each) do
-        lambda {
-          parslet.parse('baz')
-        }.should not_parse
-      end
+      let!(:cause) {
+        catch_failed_parse { parslet.parse('baz') }
+      }
 
       it "should have a sensible cause" do
-        parslet.cause.should == "Expected one of ['foo', 'bar']. at line 1 char 1."
+        cause.to_s.should == "Expected one of ['foo', 'bar'] at line 1 char 1."
       end   
       it "should have an error tree with 3 nodes" do
-        parslet.error_tree.nodes.should == 3
+        cause.should have(2).children
       end 
     end
     
@@ -166,9 +152,6 @@ describe Parslet do
     it "should accept 'bar'" do
       parslet.parse('bar')
     end
-    it "should return self for chaining" do
-      (parslet | str('baz')).should == parslet
-    end 
     it "should inspect as ('foo' / 'bar')" do
       parslet.inspect.should == "'foo' / 'bar'"
     end 
@@ -184,7 +167,8 @@ describe Parslet do
     end 
     context "when fed 'foo'" do
       it "should parse" do
-        parslet.apply(src('foo'), context).should_not be_error
+        success, _ = parslet.apply(src('foo'), context)
+        success.should == true
       end
       it "should not change input position" do
         source = src('foo')
@@ -199,7 +183,7 @@ describe Parslet do
     end
     describe "<- #parse" do
       it "should return nil" do
-        parslet.apply(src('foo'), context).result.should == nil
+        parslet.apply(src('foo'), context).should == [true, nil]
       end 
     end
   end
@@ -214,7 +198,7 @@ describe Parslet do
     end 
     context "when fed 'bar'" do
       it "should parse" do
-        parslet.apply(src('bar'), context).should_not be_error
+        parslet.apply(src('bar'), context).should == [true, nil]
       end
       it "should not change input position" do
         source = src('bar')
@@ -263,26 +247,28 @@ describe Parslet do
   describe "eof behaviour" do
     context "when the pattern just doesn't consume the input" do
       let (:parslet) { any }
+
       it "should fail the parse" do
-        lambda { 
-          parslet.parse('..')
-        }.should not_parse
-        parslet.cause.should == "Don't know what to do with . at line 1 char 2."
+        cause = catch_failed_parse { parslet.parse('..') }
+        cause.to_s.should == "Don't know what to do with \".\" at line 1 char 2."
       end 
     end
     context "when the pattern doesn't match the input" do
       let (:parslet) { (str('a')).repeat(1) }
+      attr_reader :exception
       before(:each) do
-        lambda { 
+        begin 
           parslet.parse('a.')
-        }.should not_parse
+        rescue => @exception
+        end
       end
 
-      it "should have a relevant cause" do
-        parslet.cause.should == "Expected \"a\", but got \".\" at line 1 char 2."
+      it "raises Parslet::UnconsumedInput" do
+        exception.should be_kind_of(Parslet::UnconsumedInput)
       end 
-      it "should have an error tree" do
-        parslet.error_tree.nodes.should == 1
+      it "has the correct error message" do
+        exception.message.should == \
+          "Don't know what to do with \".\" at line 1 char 2."
       end 
     end
   end

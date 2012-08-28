@@ -57,15 +57,11 @@ class Parslet::Parser < Parslet::Atoms::Base
     end
   end
   
-  def try(source, context) # :nodoc:
+  def try(source, context)
     root.try(source, context)
   end
   
-  def error_tree # :nodoc:
-    root.error_tree
-  end
-  
-  def to_s_inner(prec) # :nodoc:
+  def to_s_inner(prec)
     root.to_s(prec)
   end
 end

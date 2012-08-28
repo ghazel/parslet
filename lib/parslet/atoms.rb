@@ -5,7 +5,7 @@ module Parslet::Atoms
   # The precedence module controls parenthesis during the #inspect printing
   # of parslets. It is not relevant to other aspects of the parsing. 
   #
-  module Precedence # :nodoc:
+  module Precedence
     prec = 0
     BASE       = (prec+=1)    # everything else
     LOOKAHEAD  = (prec+=1)    # &SOMETHING
@@ -15,6 +15,7 @@ module Parslet::Atoms
     OUTER      = (prec+=1)    # printing is done here.
   end
   
+  require 'parslet/atoms/can_flatten'
   require 'parslet/atoms/context'
   require 'parslet/atoms/dsl'
   require 'parslet/atoms/base'
