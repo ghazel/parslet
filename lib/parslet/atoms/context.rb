@@ -82,7 +82,7 @@ module Parslet::Atoms
       return [false, nil]
     end
   
-  private
+  #private
     def lookup(obj, pos)
       @cache[pos][obj]
     end

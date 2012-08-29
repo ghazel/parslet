@@ -2,9 +2,6 @@
 # Eval rule body at a given position in source and cache the result
 class Parslet::Atoms::Rule::Position < Struct.new(:pos, :source, :context, :rule)
   class MemoEntry < Struct.new(:answer, :pos)
-    def error?
-      self.answer.error?
-    end
   end
 
   # A LR is info holder for left recursion
@@ -81,7 +78,7 @@ class Parslet::Atoms::Rule::Position < Struct.new(:pos, :source, :context, :rule
       self.entry = lr
       self.entry = eval_rule_body
       lr_stack.pop
-      if !self.entry.error? && lr.detected?
+      if self.entry.first && lr.detected?
         grow_lr(lr.head)
       end
       result = self.entry
@@ -123,7 +120,7 @@ class Parslet::Atoms::Rule::Position < Struct.new(:pos, :source, :context, :rule
     loop do
       h.reset_eval_rules
       entry = eval_rule_body
-      break if entry.error? || no_progress?(entry)
+      break if !entry.first || no_progress?(entry)
       self.entry = entry
     end
     self.head = nil
@@ -140,7 +137,7 @@ class Parslet::Atoms::Rule::Position < Struct.new(:pos, :source, :context, :rule
   end
 
   def fail(message)
-    MemoEntry.new(rule.error(source, message), self.pos)
+    MemoEntry.new(context.err(rule, source, message), self.pos)
   end
 
 end
