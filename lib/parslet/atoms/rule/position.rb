@@ -90,7 +90,11 @@ class Parslet::Atoms::Rule::Position < Struct.new(:pos, :source, :context, :rule
       result.setup_for_re_eval_involved_rules(lr_stack)
     end
     source.pos = result.pos
-    result.answer
+    a = result.answer
+    if a.is_a? Parslet::Atoms::Rule::Position::MemoEntry
+      a = a.answer
+    end
+    a
   end
 
   private
